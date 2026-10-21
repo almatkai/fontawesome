@@ -3,7 +3,7 @@
   "name": "font-awesome",
   "title": "Font Awesome",
   "description": "Search Font Awesome icons",
-  "icon": "command-icon.png",
+  "icon": "assets/command-icon.png",
   "author": "almatkai",
   "contributors": [
     "GLaDO8",
