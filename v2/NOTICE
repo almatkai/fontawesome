@@ -1,0 +1,30 @@
+Font Awesome standalone Rust V2
+
+Derived from https://github.com/almatkai/fontawesome at
+39549ced40cbe73492213e731064404dde84d165 (MIT declaration, author almatkai),
+and Raycast extensions/fontawesome at
+6734d85992290066fd31a7f5bee3cca3d3545a1a (author dutzi and manifest contributors).
+Original code, command PNG and 17 style assets are preserved in fixtures/source
+and resources. Raycast repository MIT license (Copyright 2021 Raycast) is
+included verbatim as LICENSE and licenses/raycast-upstream/LICENSE.
+The source repository's LICENSE contains literal backslash-n sequences;
+licenses/fontawesome-source/LICENSE preserves those original bytes.
+
+Port changes: independent Rust process, HTTPS/OAuth/GraphQL client, bounded
+credential/profile/settings-scoped volatile caches, private remembered selection
+storage, strict host ACK and lifecycle fencing, inert SVG previews, tests and
+private packaging. No Raycast JavaScript runtime is shipped.
+
+Independent tezbar-extension-sdk 0.1.1 is pinned to
+https://github.com/almatkai/tezbar-extension-sdk-rust.git at
+e955911f0bf5b558f9d3eb5183df0adc95c22af2, Apache-2.0. Its original LICENSE and
+NOTICE are included under licenses/tezbar-extension-sdk-0.1.1/.
+
+Locked runtime and QA crate metadata and original available license texts are
+recorded in resources/provenance/DEPENDENCIES.json and licenses/. A missing text is explicitly marked
+there, never replaced with an invented grant. Font Awesome service access and
+Pro icon rights remain governed by the user's Font Awesome account and terms;
+this port grants no additional rights to service-returned icons. No live icon
+catalog or Pro icon content has been bundled. The pinned upstream repository
+license is the available provenance evidence for the original command assets;
+no separate asset-specific grant has been invented.
