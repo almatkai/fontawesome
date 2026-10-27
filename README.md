@@ -24,3 +24,5 @@ To generate an API Token, follow these steps -
 4. Choose "Custom" for "Where will you use this token"
 5. For scope, select the "Read kits data", "Allowed domains" and "Pro icons and metadata" options.
 6. Generate the API Token and paste it in Raycast Preferences.
+
+Standalone external Rust implementation: [V2](./v2/README.md).

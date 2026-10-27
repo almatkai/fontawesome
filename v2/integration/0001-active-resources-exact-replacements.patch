@@ -1,0 +1,143 @@
+--- a/src-tauri/src/native_core/extensions/registry.rs
++++ b/src-tauri/src/native_core/extensions/registry.rs
+@@ -14,6 +14,7 @@
+     id: String,
+     slug: String,
+     path: PathBuf,
++    resource_dir: PathBuf,
+     manifest: Value,
+     data_dir: PathBuf,
+ }
+@@ -73,9 +74,10 @@
+             };
+             let Ok(slug) = slug(name) else { continue };
+             let native = name.starts_with("com.tezbar.native.");
++            let mut resource_dir = path.clone();
+             let mut manifest = if native {
+                 match super::process_install::resolve(ctx, name) {
+-                    Ok(package) => package.manifest,
++                    Ok(package) => { resource_dir = package.dir; package.manifest },
+                     Err(error) => {
+                         // A damaged canonical directory is NEVER a Raycast package.
+                         let mut value = read_json(&path.join("package.json"))
+@@ -108,6 +110,7 @@
+                 id,
+                 slug,
+                 path,
++                resource_dir,
+                 manifest,
+                 data_dir: ctx.paths.data_dir.clone(),
+             });
+@@ -127,9 +130,27 @@
+         .ok_or_else(|| format!("Extension is not installed: {id}"))
+ }
+ 
++// Only exact aliases from a verified installed active manifest can select a process.
++fn declares_replacement(manifest: &Value, requested: &str, command: &str) -> bool {
++    manifest["id"].as_str().is_some_and(|id| id.starts_with("com.tezbar.native."))
++        && manifest["healthError"].is_null()
++        && manifest["runtime"] == "rust"
++        && compatible(manifest, false)
++        && manifest["replaces"].as_array().is_some_and(|aliases| aliases.iter().any(|alias| alias.as_str() == Some(requested)))
++        && manifest["commands"].as_array().is_some_and(|commands| commands.iter().any(|c| c["name"] == command && c["runtime"] == "rust" && compatible(c, true)))
++}
++pub(super) fn replacement_id(ctx: &CoreContext, requested: &str, command: &str) -> Option<String> {
++    let mut matches = collect(ctx).into_iter().filter(|e| declares_replacement(&e.manifest, requested, command));
++    let selected = matches.next()?.id;
++    // Ambiguous declarations never silently select a different package.
++    if matches.next().is_some() { None } else { Some(selected) }
++}
++
+ /// Native implementations use the same discovery and platform rules as the launcher.
+ pub(super) fn installed_command(ctx: &CoreContext, id: &str, command: &str) -> Option<Installed> {
+-    let native = if id.starts_with("raycast.") {
++    let native = if let Some(canonical) = replacement_id(ctx, id, command) {
++        installed(ctx, &canonical).ok()
++    } else if id.starts_with("raycast.") {
+         let slug = slug(id).ok()?;
+         let canonical = super::v2_runtime::canonical_id(&slug);
+         installed(ctx, &canonical).ok()
+@@ -245,8 +266,8 @@
+         return None;
+     }
+     let mut candidates = vec![
+-        extension.path.join(relative),
+-        extension.path.join("assets").join(relative),
++        extension.resource_dir.join(relative),
++        extension.resource_dir.join("assets").join(relative),
+     ];
+     if extension.id.starts_with("com.tezbar.native.") {
+         if let Some(packages) = extension.path.parent() {
+@@ -309,8 +330,8 @@
+         return None;
+     }
+     let mut candidates = vec![
+-        extension.path.join(relative),
+-        extension.path.join("assets").join(relative),
++        extension.resource_dir.join(relative),
++        extension.resource_dir.join("assets").join(relative),
+     ];
+     if extension.id.starts_with("com.tezbar.native.") {
+         if let Some(packages) = extension.path.parent() {
+@@ -574,6 +595,7 @@
+     let extension = Installed {
+         id: id.into(),
+         slug: slug(id)?,
++        resource_dir: path.clone(),
+         path,
+         manifest: Value::Null,
+         data_dir: ctx.paths.data_dir.clone(),
+@@ -1651,3 +1673,34 @@
+     }
+     packages
+ }
++
++#[cfg(test)]
++mod external_package_resolution_tests {
++    use super::*;
++    #[test]
++    fn exact_verified_replacement_and_command_only() {
++        let m = json!({"id":"com.tezbar.native.example", "runtime":"rust", "platforms":["macOS","Windows","Linux"],"replaces":["com.tezbar.example", "raycast.example"],"commands":[{"name":"index","runtime":"rust","platforms":["macOS","Windows","Linux"]}]});
++        assert!(declares_replacement(&m, "com.tezbar.example", "index"));
++        assert!(declares_replacement(&m, "raycast.example", "index"));
++        assert!(!declares_replacement(&m, "example", "index"));
++        assert!(!declares_replacement(&m, "com.tezbar.example-other", "index"));
++        assert!(!declares_replacement(&m, "com.tezbar.example", "other"));
++        let mut damaged=m.clone(); damaged["healthError"]=json!("tampered");
++        assert!(!declares_replacement(&damaged,"com.tezbar.example","index"));
++        let mut wrong=m.clone();wrong["commands"][0]["runtime"]=json!("javascript");
++        assert!(!declares_replacement(&wrong,"com.tezbar.example","index"));
++        wrong=m.clone(); wrong["commands"][0]["platforms"]=json!(["unsupported"]);
++        assert!(!declares_replacement(&wrong,"com.tezbar.example","index"));
++    }
++    #[test]
++    fn active_resources_keep_canonical_preferences_root() {
++        let qa=tempfile::tempdir().unwrap(); let canonical=qa.path().join("packages/com.tezbar.native.example");
++        let active=canonical.join("versions/2.0.0"); std::fs::create_dir_all(active.join("resources")).unwrap();
++        std::fs::write(active.join("resources/icon.png"),b"pinned icon").unwrap();
++        let e=Installed{id:"com.tezbar.native.example".into(),slug:"example".into(),path:canonical.clone(),resource_dir:active.clone(),manifest:json!({"icon":"resources/icon.png"}),data_dir:qa.path().into()};
++        assert_eq!(icon_path(&e),Some(active.join("resources/icon.png").to_string_lossy().into()));
++        assert_eq!(e.path,canonical); assert_ne!(e.path,e.resource_dir);
++        assert_eq!(command_icon_path(&e,&json!({"icon":"resources/icon.png"})),icon_path(&e));
++        assert!(command_icon_path(&e,&json!({"icon":"../outside.png"})).is_none());
++    }
++}
+--- a/src-tauri/src/native_core/extensions/native.rs
++++ b/src-tauri/src/native_core/extensions/native.rs
+@@ -616,6 +616,7 @@
+         } else if channel == "extension:run-command" {
+             let requested = body["extensionId"].as_str().unwrap_or("");
+             if requested.starts_with("com.tezbar.native.") || v2_runtime::slug(requested).is_some()
++                || registry::replacement_id(ctx, requested, body["commandName"].as_str().unwrap_or("")).is_some()
+             {
+                 self.launch(ctx, files, body).await
+             } else {
+@@ -643,6 +644,8 @@
+         let command = body["commandName"].as_str().ok_or("Missing commandName")?;
+         let canonical = if requested.starts_with("com.tezbar.native.") {
+             requested.to_string()
++        } else if let Some(canonical) = registry::replacement_id(ctx, requested, command) {
++            canonical
+         } else {
+             v2_runtime::canonical_id(v2_runtime::slug(requested).ok_or("Unknown extension")?)
+         };
